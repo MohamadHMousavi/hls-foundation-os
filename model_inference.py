@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument('-output', help='path to save output image')
     parser.add_argument('-input_type', help='file type of input images',default="tif")
     parser.add_argument('-bands', help='bands in the file where to find the relevant data',default=None)
+    parser.add_argument('-trans', help='file type of input images', action='store_true')
     
     args = parser.parse_args()
     
@@ -108,36 +109,42 @@ def inference_segmentor(model, imgs, custom_test_pipeline=None):
     return result
 
 
-def inference_on_file(model, target_image, output_image, custom_test_pipeline):
+def inference_on_file(model, target_image, output_image, custom_test_pipeline, trans):
     
     time_taken=-1
-    try:
-        st = time.time()
-        print('Running inference...')
-        result = inference_segmentor(model, target_image, custom_test_pipeline)
-        print("Output has shape: " + str(result[0].shape))
+    # try:
+    st = time.time()
+    print('Running inference...')
+    result = inference_segmentor(model, target_image, custom_test_pipeline)
+    print("Output has shape: " + str(result[0].shape))
 
-        ##### get metadata mask
+    ##### get metadata mask
+    if trans:
+        mask = open_tiff(target_image).transpose([2, 0, 1])
+    else:
         mask = open_tiff(target_image)
-        meta = get_meta(target_image)
-        mask = np.where(mask == meta['nodata'], 1, 0)
-        mask = np.max(mask, axis=0)[None]
+    # mask = open_tiff(target_image).transpose([2, 0, 1])
+    print(result[0].shape, mask.shape, target_image)
 
-        result[0] = np.where(mask == 1, -1, result[0])
+    meta = get_meta(target_image)
+    mask = np.where(mask == meta['nodata'], 1, 0)
+    mask = np.max(mask, axis=0)[None]
+    print(result[0].shape, mask.shape, target_image)
+    result[0] = np.where(mask == 1, -1, result[0])
 
-        ##### Save file to disk
-        meta["count"] = 1
-        meta["dtype"] = "int16"
-        meta["compress"] = "lzw"
-        meta["nodata"] = -1
-        print('Saving output...')
-        write_tiff(result[0], output_image, meta)
-        et = time.time()
-        time_taken = np.round(et - st, 1)
-        print(f'Inference completed in {str(time_taken)} seconds. Output available at: ' + output_image)
+    ##### Save file to disk
+    meta["count"] = 1
+    meta["dtype"] = "int16"
+    meta["compress"] = "lzw"
+    meta["nodata"] = -1
+    print('Saving output...')
+    write_tiff(result[0], output_image, meta)
+    et = time.time()
+    time_taken = np.round(et - st, 1)
+    print(f'Inference completed in {str(time_taken)} seconds. Output available at: ' + output_image)
         
-    except:
-        print(f'Error on image {target_image} \nContinue to next input')
+    # except Exception as e:
+        # print(f'Error on image {target_image} \nContinue to next input, {e}')
         
     return time_taken
 
@@ -163,7 +170,7 @@ def process_test_pipeline(custom_test_pipeline, bands=None):
     return custom_test_pipeline
 
 
-def inference_on_files(config_path, ckpt, input_type, input_path, output_path, bands):
+def inference_on_files(config_path, ckpt, input_type, input_path, output_path, bands, trans):
     
     # load model
     config = Config.fromfile(config_path)
@@ -188,7 +195,7 @@ def inference_on_files(config_path, ckpt, input_type, input_path, output_path, b
         print(f'Working on Image {i}')
         output_image = output_path+target_image.split("/")[-1].replace('.' + input_type, '_pred.'+input_type)
         
-        inference_on_file(model, target_image, output_image, custom_test_pipeline)
+        inference_on_file(model, target_image, output_image, custom_test_pipeline, trans)
 
 def main():
     
@@ -200,8 +207,9 @@ def main():
     input_path = args.input
     output_path = args.output
     bands = args.bands
-    
-    inference_on_files(config_path, ckpt, input_type, input_path, output_path, bands)
+    trans = args.trans
+
+    inference_on_files(config_path, ckpt, input_type, input_path, output_path, bands, trans)
     
 if __name__ == "__main__":
     main()
